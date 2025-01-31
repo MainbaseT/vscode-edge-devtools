@@ -9,11 +9,11 @@ import * as path from 'path';
 import * as url from 'url';
 import * as vscode from 'vscode';
 import * as debugCore from 'vscode-chrome-debug-core';
-import TelemetryReporter from 'vscode-extension-telemetry';
+import TelemetryReporter from '@vscode/extension-telemetry';
 import packageJson from '../package.json';
 import { DebugTelemetryReporter } from './debugTelemetryReporter';
 
-import puppeteer from 'puppeteer-core';
+import puppeteer, {Browser} from 'puppeteer-core';
 import { ErrorReporter } from './errorReporter';
 import { ErrorCodes } from './common/errorCodes';
 
@@ -63,6 +63,7 @@ export interface IRuntimeConfig {
     useLocalEdgeWatch: boolean;
     devtoolsBaseUri?: string;
     defaultEntrypoint?: string;
+    browserFlavor: BrowserFlavor;
 }
 export interface IStringDictionary<T> {
     [name: string]: T;
@@ -109,8 +110,8 @@ export const SETTINGS_DEFAULT_ENTRY_POINT = 'index.html';
 const WIN_APP_DATA = process.env.LOCALAPPDATA || '/';
 const msEdgeBrowserMapping: Map<BrowserFlavor, IBrowserPath> = new Map<BrowserFlavor, IBrowserPath>();
 
-// Current Revision: 120.0.2210.181
-export const CDN_FALLBACK_REVISION = '@6e7adbe405f69993cc1eb8c5dc9ea51868c4fb36';
+// Current Revision: 132.0.2957.140
+export const CDN_FALLBACK_REVISION = '@a81e27b375d4f113f79997ac7f2bb49b93fbb84d';
 
 /** Build-specified flags. */
 declare const DEBUG: boolean;
@@ -225,7 +226,7 @@ export async function getListOfTargets(hostname: string, port: number, useHttps:
             if (jsonResponse) {
                 break;
             }
-        } catch (e) {
+        } catch {
             // localhost might not be ready as the user might not have a server running
             // user may also have changed settings making the endpoint invalid
         }
@@ -337,7 +338,7 @@ export async function getJsDebugCDPProxyWebsocketUrl(debugSessionId: string): Pr
 export function createTelemetryReporter(_context: vscode.ExtensionContext): Readonly<TelemetryReporter> {
     if (packageJson && (_context.extensionMode === vscode.ExtensionMode.Production)) {
         // Use the real telemetry reporter
-        return new TelemetryReporter(packageJson.name, packageJson.version, packageJson.aiKey);
+        return new TelemetryReporter(packageJson.oneDSKey);
     }
         // Fallback to a fake telemetry reporter
         return new DebugTelemetryReporter();
@@ -393,7 +394,7 @@ export async function getBrowserPath(config: Partial<IUserConfig> = {}): Promise
  * @param userDataDir The user data directory for the launched instance
  * @param forceHeadless This force overrides the --headless arg for browser launch
  */
-export async function launchBrowser(browserPath: string, port: number, targetUrl: string, userDataDir?: string, forceHeadless?: boolean): Promise<puppeteer.Browser> {
+export async function launchBrowser(browserPath: string, port: number, targetUrl: string, userDataDir?: string, forceHeadless?: boolean): Promise<Browser> {
     const args = [
         '--no-first-run',
         '--no-default-browser-check',
@@ -454,6 +455,7 @@ export function removeTrailingSlash(uri: string): string {
 export function getRuntimeConfig(config: Partial<IUserConfig> = {}): IRuntimeConfig {
     const settings = vscode.workspace.getConfiguration(SETTINGS_STORE_NAME);
     const pathMapping = config.pathMapping || settings.get('pathMapping') || SETTINGS_DEFAULT_PATH_MAPPING;
+    const browserFlavor = config.browserFlavor || settings.get('browserFlavor') || 'Default';
     const sourceMapPathOverrides =
         config.sourceMapPathOverrides || settings.get('sourceMapPathOverrides') || SETTINGS_DEFAULT_PATH_OVERRIDES;
     const webRoot = config.webRoot || settings.get('webRoot') || SETTINGS_DEFAULT_WEB_ROOT;
@@ -499,6 +501,7 @@ export function getRuntimeConfig(config: Partial<IUserConfig> = {}): IRuntimeCon
     return {
         pathMapping: resolvedMappingOverrides,
         sourceMapPathOverrides: resolvedOverrides,
+        browserFlavor,
         sourceMaps,
         webRoot: resolvedWebRoot,
         isJsDebugProxiedCDPConnection: false,

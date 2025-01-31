@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import * as vscode from 'vscode';
-import TelemetryReporter from 'vscode-extension-telemetry';
+import TelemetryReporter from '@vscode/extension-telemetry';
 import {
     IUserConfig,
     SETTINGS_STORE_NAME,
@@ -42,7 +42,7 @@ export class LaunchDebugProvider implements vscode.DebugConfigurationProvider {
         return Promise.resolve([providedDebugConfig]);
     }
 
-    resolveDebugConfiguration(
+    resolveDebugConfigurationWithSubstitutedVariables(
         folder: vscode.WorkspaceFolder | undefined,
         config: vscode.DebugConfiguration, _token?: vscode.CancellationToken):
         vscode.ProviderResult<vscode.DebugConfiguration> {
@@ -64,7 +64,7 @@ export class LaunchDebugProvider implements vscode.DebugConfigurationProvider {
             }
         } else {
             this.telemetryReporter.sendTelemetryEvent('debug/error/config_not_found');
-            vscode.window.showErrorMessage('No supported launch config was found.') as Promise<void>;
+            void vscode.window.showErrorMessage('No supported launch config was found.');
         }
 
         return undefined;

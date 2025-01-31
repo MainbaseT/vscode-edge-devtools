@@ -5,7 +5,7 @@
 // tslint:disable: variable-name
 
 import { Disposable, ExtensionContext, WebviewPanel } from "vscode";
-import TelemetryReporter from "vscode-extension-telemetry";
+import TelemetryReporter from "@vscode/extension-telemetry";
 import { TelemetryData, webviewEventNames } from "../src/common/webviewEvents";
 import { PanelSocket } from "../src/panelSocket";
 import { JsDebugProxyPanelSocket } from "../src/JsDebugProxyPanelSocket";
@@ -48,6 +48,7 @@ describe("devtoolsPanel", () => {
             webRoot: "",
             isJsDebugProxiedCDPConnection: false,
             useLocalEdgeWatch: false,
+            browserFlavor: "Default",
         };
 
         mockPanel = {
@@ -173,6 +174,7 @@ describe("devtoolsPanel", () => {
     describe("update", () => {
         it("adds attempts to detect browser version only when visible", async () => {
             const dtp = await import("../src/devtoolsPanel");
+            mockRuntimeConfig.browserFlavor = 'Stable';
             dtp.DevToolsPanel.createOrShow(context, mockTelemetry, "", mockRuntimeConfig);
             expect(mockPanel.onDidChangeViewState).toHaveBeenCalled();
 

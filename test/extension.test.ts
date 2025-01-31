@@ -2,8 +2,8 @@
 // Licensed under the MIT License.
 
 import { ExtensionContext, Uri} from "vscode";
-import TelemetryReporter from "vscode-extension-telemetry";
-import { createFakeExtensionContext, createFakeTelemetryReporter, createFakeVSCode, Mocked } from "./helpers/helpers";
+import TelemetryReporter from "@vscode/extension-telemetry";
+import { createFakeExtensionContext, createFakeTelemetryReporter, createFakeVSCode, createFakeLanguageClient, Mocked } from "./helpers/helpers";
 import {
     buttonCode,
     IRemoteTargetJson,
@@ -11,9 +11,11 @@ import {
     removeTrailingSlash,
     SETTINGS_STORE_NAME,
     SETTINGS_VIEW_NAME,
+    type IUserConfig,
 } from "../src/utils";
 
 jest.mock("vscode", () => createFakeVSCode(), { virtual: true });
+jest.mock("vscode-languageclient/node", () => createFakeLanguageClient(), { virtual: true });
 
 describe("extension", () => {
     const fakeRuntimeConfig: Partial<IRuntimeConfig> = {};
@@ -59,6 +61,9 @@ describe("extension", () => {
                     CDPTargetsProvider: mockProviderConstructor,
                 };
             });
+
+            const mockLanguageClient = createFakeLanguageClient()
+            jest.doMock("vscode-languageclient/node", () => mockLanguageClient, { virtual: true });
 
             // Mock out vscode command registration
             const mockVSCode = createFakeVSCode();
@@ -491,6 +496,39 @@ describe("extension", () => {
             expect(startDebuggingMock).toHaveBeenNthCalledWith(2, undefined, expect.objectContaining({
                 url: expectedUrl
             }));
+        });
+
+        it("calls launch on launch command with arguments", async () => {
+            const vscode = jest.requireMock("vscode");
+
+            // As we are overriding launch method we mock the extension.ts
+            jest.mock("../src/extension");
+
+            const args = { launchUrl: "http://example.com" };
+
+            const context = createFakeExtensionContext();
+
+            const newExtension = await import('../src/extension');
+
+            // We mock the implementation for the launch function to validate it is able to being called with url
+            // arguments
+            jest.spyOn(newExtension, 'launch').mockImplementation((context: ExtensionContext, launchUrl ?: string, config ?: Partial<IUserConfig>)=> {
+                expect(launchUrl).toEqual(args.launchUrl);
+                return Promise.resolve();
+            })
+
+            // We mimic the call
+            context.subscriptions.push(vscode.commands.registerCommand(`${SETTINGS_STORE_NAME}.launch`, ( opts: {launchUrl: string} = {launchUrl: ""} ): void => {
+                void newExtension.launch(context, opts.launchUrl);
+            }));
+
+            const callback = vscode.commands.registerCommand.mock.calls[0][1];
+            expect(callback).toBeDefined();
+
+            await callback!(args);
+
+            // Cleaning the mock after this test.
+            jest.unmock("../src/extension");
         });
 
         it("calls launch on launch command", async () => {

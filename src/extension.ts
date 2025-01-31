@@ -1,10 +1,10 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-import { Browser, Target } from 'puppeteer-core';
+import { Browser, Target, TargetType } from 'puppeteer-core';
 import * as vscode from 'vscode';
 import * as debugCore from 'vscode-chrome-debug-core';
-import TelemetryReporter from 'vscode-extension-telemetry';
+import TelemetryReporter from '@vscode/extension-telemetry';
 import { CDPTarget } from './cdpTarget';
 import { CDPTargetsProvider } from './cdpTargetsProvider';
 import { DevToolsPanel } from './devtoolsPanel';
@@ -40,10 +40,12 @@ import {
 import { LaunchConfigManager, providedHeadlessDebugConfig, providedLaunchDevToolsConfig } from './launchConfigManager';
 import { ErrorReporter } from './errorReporter';
 import { ErrorCodes } from './common/errorCodes';
-import {
-    LanguageClient,
+import type {
     LanguageClientOptions,
     ServerOptions,
+} from 'vscode-languageclient/node';
+import {
+    LanguageClient,
     TransportKind,
 } from 'vscode-languageclient/node';
 import type { installFailed, showOutput } from 'vscode-webhint/dist/src/utils/notifications';
@@ -81,8 +83,8 @@ export function activate(context: vscode.ExtensionContext): void {
         void attach(context);
     }));
 
-    context.subscriptions.push(vscode.commands.registerCommand(`${SETTINGS_STORE_NAME}.launch`, (): void => {
-        void launch(context);
+    context.subscriptions.push(vscode.commands.registerCommand(`${SETTINGS_STORE_NAME}.launch`, (opts: {launchUrl: string} = {launchUrl: ''}): void => {
+        void launch(context, opts.launchUrl);
     }));
 
     context.subscriptions.push(vscode.commands.registerCommand(`${SETTINGS_STORE_NAME}.attachToCurrentDebugTarget`, (debugSessionId: string | undefined, config: Partial<IUserConfig>): void => {
@@ -177,6 +179,14 @@ export function activate(context: vscode.ExtensionContext): void {
             const normalizedPath = new URL(target.description).toString();
             if (browserInstance) {
                 const browserPages = await browserInstance.pages();
+
+                // First we validate we have pages to close, some non-visual targets could keep the browser
+                // instance alive.
+                if (!browserPages || browserPages.length === 0){
+                    void browserInstance.close();
+                    return;
+                }
+
                 for (const page of browserPages) {
                     // URL needs to be accessed through the target as the page could be handling errors in a different way.
                     // e.g redirecting to chrome-error: protocol
@@ -257,12 +267,12 @@ export function activate(context: vscode.ExtensionContext): void {
 
     const settingsConfig = vscode.workspace.getConfiguration(SETTINGS_STORE_NAME);
     if (settingsConfig.get('webhint')) {
-        startWebhint(context);
+        void startWebhint(context);
     }
     vscode.workspace.onDidChangeConfiguration(event => {
         if (event.affectsConfiguration(`${SETTINGS_STORE_NAME}.webhint`)) {
             if (vscode.workspace.getConfiguration(SETTINGS_STORE_NAME).get('webhint')) {
-                startWebhint(context);
+                void startWebhint(context);
             } else {
                 void stopWebhint();
             }
@@ -303,7 +313,7 @@ export async function launchScreencast(context: vscode.ExtensionContext, fileUri
     }
 }
 
-function startWebhint(context: vscode.ExtensionContext): void {
+async function startWebhint(context: vscode.ExtensionContext): Promise<void> {
     const args = [context.globalStoragePath, languageServerName];
     const module = context.asAbsolutePath('node_modules/vscode-webhint/dist/src/server.js');
     const transport = TransportKind.ipc;
@@ -370,37 +380,34 @@ function startWebhint(context: vscode.ExtensionContext): void {
 
     // Create and start the client (also starts the server).
     client = new LanguageClient('Microsoft Edge Tools', serverOptions, clientOptions);
-
-    void client.onReady().then(() => {
-        // Listen for notification that the webhint install failed.
-        const installFailedNotification: typeof installFailed = 'vscode-webhint/install-failed';
-        const disableInstallFailedNotification = vscode.workspace.getConfiguration(SETTINGS_STORE_NAME).get('webhintInstallNotification');
-        client.onNotification(installFailedNotification, () => {
-            if (!telemetryReporter) {
-                telemetryReporter = createTelemetryReporter(context);
-            }
-            telemetryReporter.sendTelemetryEvent('user/webhint/install-failed');
-            if (!disableInstallFailedNotification) {
-                const message = 'Ensure `node` and `npm` are installed to enable automatically reporting issues in source files pertaining to accessibility, compatibility, security, and more.';
-                void vscode.window.showInformationMessage(message, 'Remind me Later', 'Don\'t show again', 'Disable Extension').then(button => {
-                    if (button === 'Disable Extension') {
-                        void vscode.workspace.getConfiguration(SETTINGS_STORE_NAME).update('webhint', false, vscode.ConfigurationTarget.Global);
-                    }
-                    if (button === 'Don\'t show again') {
-                        void vscode.workspace.getConfiguration(SETTINGS_STORE_NAME).update('webhintInstallNotification', true, vscode.ConfigurationTarget.Global);
-                    }
-                });
-            }
-        });
-        // Listen for requests to show the output panel for this extension.
-        const showOutputNotification: typeof showOutput = 'vscode-webhint/show-output';
-        client.onNotification(showOutputNotification, () => {
-            client.outputChannel.clear();
-            client.outputChannel.show(true);
-        });
+    // Listen for notification that the webhint install failed.
+    const installFailedNotification: typeof installFailed = 'vscode-webhint/install-failed';
+    const disableInstallFailedNotification = vscode.workspace.getConfiguration(SETTINGS_STORE_NAME).get('webhintInstallNotification');
+    client.onNotification(installFailedNotification, () => {
+        if (!telemetryReporter) {
+            telemetryReporter = createTelemetryReporter(context);
+        }
+        telemetryReporter.sendTelemetryEvent('user/webhint/install-failed');
+        if (!disableInstallFailedNotification) {
+            const message = 'Ensure `node` and `npm` are installed to enable automatically reporting issues in source files pertaining to accessibility, compatibility, security, and more.';
+            void vscode.window.showInformationMessage(message, 'Remind me Later', 'Don\'t show again', 'Disable Extension').then(button => {
+                if (button === 'Disable Extension') {
+                    void vscode.workspace.getConfiguration(SETTINGS_STORE_NAME).update('webhint', false, vscode.ConfigurationTarget.Global);
+                }
+                if (button === 'Don\'t show again') {
+                    void vscode.workspace.getConfiguration(SETTINGS_STORE_NAME).update('webhintInstallNotification', true, vscode.ConfigurationTarget.Global);
+                }
+            });
+        }
     });
 
-    client.start();
+    // Listen for requests to show the output panel for this extension.
+    const showOutputNotification: typeof showOutput = 'vscode-webhint/show-output';
+    client.onNotification(showOutputNotification, () => {
+        client.outputChannel.clear();
+        client.outputChannel.show(true);
+    });
+    await client.start();
 }
 
 async function stopWebhint(): Promise<void> {
@@ -589,7 +596,7 @@ export async function launch(context: vscode.ExtensionContext, launchUrl?: strin
             if (!exeName) { return; }
             const match = exeName.match(/(chrome|edge)/gi) || [];
             const knownBrowser = match.length > 0 ? match[0] : 'other';
-            const browserProps = { exe: `${knownBrowser.toLowerCase()}` };
+            const browserProps = { exe: `${knownBrowser?.toLowerCase()}` };
             telemetryReporter.sendTelemetryEvent('command/launch/browser', browserProps);
 
         browserInstance = await launchBrowser(browserPath, port, url, userDataDir);
@@ -603,7 +610,7 @@ export async function launch(context: vscode.ExtensionContext, launchUrl?: strin
             cdpTargetsProvider.refresh();
         });
         browserInstance.on('targetchanged',  (target: Target) => {
-            if (target.type() === 'page') {
+            if (target.type() === TargetType.PAGE) {
                 reportUrlType(target.url(), telemetryReporter);
             }
         });
